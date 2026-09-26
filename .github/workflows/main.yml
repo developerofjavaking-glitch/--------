@@ -1,0 +1,631 @@
+name: Build Tic Tac Toe APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Generate Project Code, Logo & Build APK
+        run: |
+          set -e
+
+          # ১. প্রয়োজনীয় ফোল্ডার তৈরি
+          mkdir -p app/src/main/java/com/example/tictactoe
+          mkdir -p app/src/main/res/drawable
+
+          # ২. settings.gradle তৈরি
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "TicTacToe"
+          include ':app'
+          EOF
+
+          # ৩. Root build.gradle তৈরি
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          EOF
+
+          # ৪. app/build.gradle তৈরি
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.example.tictactoe'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.example.tictactoe"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 2
+                  versionName "2.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          # ৫. অ্যাপ লোগো (Vector Drawable) তৈরি
+          cat << 'EOF' > app/src/main/res/drawable/ic_app_logo.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#1E1E2E"
+                  android:pathData="M20,0 h68 a20,20 0 0 1 20,20 v68 a20,20 0 0 1 -20,20 h-68 a20,20 0 0 1 -20,-20 v-68 a20,20 0 0 1 20,-20 z" />
+              <path
+                  android:strokeColor="#45475A"
+                  android:strokeWidth="4"
+                  android:strokeLineCap="round"
+                  android:pathData="M38,18 L38,90 M70,18 L70,90 M18,38 L90,38 M18,70 L90,70" />
+              <path
+                  android:strokeColor="#A6E3A1"
+                  android:strokeWidth="5"
+                  android:strokeLineCap="round"
+                  android:pathData="M23,23 L33,33 M33,23 L23,33" />
+              <path
+                  android:strokeColor="#FAB387"
+                  android:strokeWidth="5"
+                  android:strokeLineCap="round"
+                  android:pathData="M54,46 A8,8 0 1,0 54,62 A8,8 0 1,0 54,46" />
+              <path
+                  android:strokeColor="#A6E3A1"
+                  android:strokeWidth="5"
+                  android:strokeLineCap="round"
+                  android:pathData="M75,75 L85,85 M85,75 L75,85" />
+          </vector>
+          EOF
+
+          # ৬. AndroidManifest.xml তৈরি
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_app_logo"
+                  android:roundIcon="@drawable/ic_app_logo"
+                  android:label="Tic Tac Toe"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # ৭. সম্পূর্ণ গেম লজিক (Pass & Play, Easy/Normal/Unbeatable AI)
+          cat << 'EOF' > app/src/main/java/com/example/tictactoe/MainActivity.java
+          package com.example.tictactoe;
+
+          import android.app.Activity;
+          import android.graphics.Color;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.widget.Button;
+          import android.widget.GridLayout;
+          import android.widget.ImageView;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.Random;
+
+          public class MainActivity extends Activity {
+              private enum GameMode { PASS_AND_PLAY, VS_AI }
+              private enum Difficulty { EASY, NORMAL, UNBEATABLE }
+
+              private GameMode currentMode = GameMode.VS_AI;
+              private Difficulty currentDifficulty = Difficulty.UNBEATABLE;
+
+              private int[] board = new int[9]; // 0: empty, 1: X, 2: O
+              private boolean isXTurn = true;
+              private boolean gameOver = false;
+              private boolean isAiThinking = false;
+              private int movesCount = 0;
+
+              private int scoreX = 0;
+              private int scoreO = 0;
+              private int scoreDraw = 0;
+
+              private Button[][] buttons = new Button[3][3];
+              private TextView statusTextView;
+              private TextView scoreTextView;
+              private LinearLayout aiDifficultyContainer;
+              private Button btnPassAndPlay;
+              private Button btnVsAi;
+              private Button btnEasy;
+              private Button btnNormal;
+              private Button btnUnbeatable;
+
+              private final Handler handler = new Handler(Looper.getMainLooper());
+              private final Random random = new Random();
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  ScrollView scrollView = new ScrollView(this);
+                  scrollView.setFillViewport(true);
+                  scrollView.setBackgroundColor(Color.parseColor("#181825"));
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setGravity(Gravity.CENTER_HORIZONTAL);
+                  root.setPadding(24, 32, 24, 32);
+                  scrollView.addView(root);
+
+                  // Header with Logo
+                  LinearLayout header = new LinearLayout(this);
+                  header.setOrientation(LinearLayout.HORIZONTAL);
+                  header.setGravity(Gravity.CENTER);
+                  header.setPadding(0, 0, 0, 16);
+
+                  ImageView logoView = new ImageView(this);
+                  logoView.setImageResource(R.drawable.ic_app_logo);
+                  int logoSize = (int) (getResources().getDisplayMetrics().density * 44);
+                  LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(logoSize, logoSize);
+                  logoParams.setMargins(0, 0, 14, 0);
+                  logoView.setLayoutParams(logoParams);
+                  header.addView(logoView);
+
+                  TextView titleView = new TextView(this);
+                  titleView.setText("Tic Tac Toe");
+                  titleView.setTextSize(26);
+                  titleView.setTextColor(Color.WHITE);
+                  header.addView(titleView);
+                  root.addView(header);
+
+                  // Mode Selector
+                  LinearLayout modeLayout = new LinearLayout(this);
+                  modeLayout.setOrientation(LinearLayout.HORIZONTAL);
+                  modeLayout.setGravity(Gravity.CENTER);
+                  modeLayout.setPadding(0, 4, 0, 10);
+
+                  btnPassAndPlay = createOptionButton("👥 Pass & Play");
+                  btnVsAi = createOptionButton("🤖 AI Mode");
+
+                  btnPassAndPlay.setOnClickListener(v -> setGameMode(GameMode.PASS_AND_PLAY));
+                  btnVsAi.setOnClickListener(v -> setGameMode(GameMode.VS_AI));
+
+                  modeLayout.addView(btnPassAndPlay);
+                  modeLayout.addView(btnVsAi);
+                  root.addView(modeLayout);
+
+                  // Difficulty Selector
+                  aiDifficultyContainer = new LinearLayout(this);
+                  aiDifficultyContainer.setOrientation(LinearLayout.HORIZONTAL);
+                  aiDifficultyContainer.setGravity(Gravity.CENTER);
+                  aiDifficultyContainer.setPadding(0, 0, 0, 14);
+
+                  btnEasy = createOptionButton("🟢 Easy");
+                  btnNormal = createOptionButton("🟡 Normal");
+                  btnUnbeatable = createOptionButton("🔴 Unbeatable");
+
+                  btnEasy.setOnClickListener(v -> setDifficulty(Difficulty.EASY));
+                  btnNormal.setOnClickListener(v -> setDifficulty(Difficulty.NORMAL));
+                  btnUnbeatable.setOnClickListener(v -> setDifficulty(Difficulty.UNBEATABLE));
+
+                  aiDifficultyContainer.addView(btnEasy);
+                  aiDifficultyContainer.addView(btnNormal);
+                  aiDifficultyContainer.addView(btnUnbeatable);
+                  root.addView(aiDifficultyContainer);
+
+                  // Scoreboard
+                  scoreTextView = new TextView(this);
+                  scoreTextView.setTextSize(14);
+                  scoreTextView.setTextColor(Color.parseColor("#BAC2DE"));
+                  scoreTextView.setGravity(Gravity.CENTER);
+                  scoreTextView.setPadding(0, 0, 0, 8);
+                  root.addView(scoreTextView);
+
+                  // Status Text
+                  statusTextView = new TextView(this);
+                  statusTextView.setTextSize(18);
+                  statusTextView.setTextColor(Color.parseColor("#89B4FA"));
+                  statusTextView.setGravity(Gravity.CENTER);
+                  statusTextView.setPadding(0, 4, 0, 16);
+                  root.addView(statusTextView);
+
+                  // 3x3 Grid
+                  GridLayout gridLayout = new GridLayout(this);
+                  gridLayout.setRowCount(3);
+                  gridLayout.setColumnCount(3);
+                  gridLayout.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
+
+                  int btnSize = (int) (getResources().getDisplayMetrics().density * 88);
+
+                  for (int i = 0; i < 3; i++) {
+                      for (int j = 0; j < 3; j++) {
+                          final int row = i;
+                          final int col = j;
+                          Button btn = new Button(this);
+                          btn.setTextSize(34);
+                          btn.setTextColor(Color.WHITE);
+                          btn.setBackgroundColor(Color.parseColor("#313244"));
+                          GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+                          params.width = btnSize;
+                          params.height = btnSize;
+                          params.setMargins(8, 8, 8, 8);
+                          btn.setLayoutParams(params);
+
+                          btn.setOnClickListener(v -> onCellClicked(row, col));
+
+                          buttons[i][j] = btn;
+                          gridLayout.addView(btn);
+                      }
+                  }
+                  root.addView(gridLayout);
+
+                  // Reset Button
+                  Button resetBtn = new Button(this);
+                  resetBtn.setText("🔄 Restart Game");
+                  resetBtn.setTextSize(16);
+                  resetBtn.setTextColor(Color.WHITE);
+                  resetBtn.setBackgroundColor(Color.parseColor("#F38BA8"));
+                  LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                  );
+                  resetParams.setMargins(0, 20, 0, 0);
+                  resetBtn.setLayoutParams(resetParams);
+                  resetBtn.setPadding(36, 16, 36, 16);
+                  resetBtn.setOnClickListener(v -> resetBoard());
+                  root.addView(resetBtn);
+
+                  setContentView(scrollView);
+
+                  updateModeUI();
+                  updateScoreUI();
+                  resetBoard();
+              }
+
+              private Button createOptionButton(String text) {
+                  Button btn = new Button(this);
+                  btn.setText(text);
+                  btn.setTextSize(13);
+                  btn.setTextColor(Color.WHITE);
+                  btn.setBackgroundColor(Color.parseColor("#45475A"));
+                  LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                  );
+                  p.setMargins(6, 4, 6, 4);
+                  btn.setLayoutParams(p);
+                  btn.setPadding(20, 10, 20, 10);
+                  return btn;
+              }
+
+              private void setGameMode(GameMode mode) {
+                  if (currentMode != mode) {
+                      currentMode = mode;
+                      scoreX = 0;
+                      scoreO = 0;
+                      scoreDraw = 0;
+                      updateModeUI();
+                      updateScoreUI();
+                      resetBoard();
+                  }
+              }
+
+              private void setDifficulty(Difficulty diff) {
+                  currentDifficulty = diff;
+                  updateModeUI();
+                  resetBoard();
+              }
+
+              private void updateModeUI() {
+                  int activeColor = Color.parseColor("#CBA6F7");
+                  int inactiveColor = Color.parseColor("#45475A");
+
+                  btnPassAndPlay.setBackgroundColor(currentMode == GameMode.PASS_AND_PLAY ? activeColor : inactiveColor);
+                  btnVsAi.setBackgroundColor(currentMode == GameMode.VS_AI ? activeColor : inactiveColor);
+
+                  if (currentMode == GameMode.VS_AI) {
+                      aiDifficultyContainer.setVisibility(View.VISIBLE);
+                      btnEasy.setBackgroundColor(currentDifficulty == Difficulty.EASY ? Color.parseColor("#2E7D32") : inactiveColor);
+                      btnNormal.setBackgroundColor(currentDifficulty == Difficulty.NORMAL ? Color.parseColor("#E65100") : inactiveColor);
+                      btnUnbeatable.setBackgroundColor(currentDifficulty == Difficulty.UNBEATABLE ? Color.parseColor("#C62828") : inactiveColor);
+                  } else {
+                      aiDifficultyContainer.setVisibility(View.GONE);
+                  }
+              }
+
+              private void updateScoreUI() {
+                  if (currentMode == GameMode.VS_AI) {
+                      scoreTextView.setText("You (X): " + scoreX + "  |  Draws: " + scoreDraw + "  |  AI (O): " + scoreO);
+                  } else {
+                      scoreTextView.setText("Player X: " + scoreX + "  |  Draws: " + scoreDraw + "  |  Player O: " + scoreO);
+                  }
+              }
+
+              private void onCellClicked(int r, int c) {
+                  int index = r * 3 + c;
+                  if (gameOver || isAiThinking || board[index] != 0) {
+                      return;
+                  }
+
+                  makeMove(r, c, isXTurn ? 1 : 2);
+
+                  if (checkGameStatus()) {
+                      return;
+                  }
+
+                  isXTurn = !isXTurn;
+
+                  if (currentMode == GameMode.VS_AI && !isXTurn) {
+                      isAiThinking = true;
+                      statusTextView.setText("🤖 AI is thinking...");
+                      statusTextView.setTextColor(Color.parseColor("#F9E2AF"));
+
+                      handler.postDelayed(() -> {
+                          if (!gameOver) {
+                              makeAiMove();
+                              isAiThinking = false;
+                              if (!checkGameStatus()) {
+                                  isXTurn = true;
+                                  statusTextView.setText("Your Turn (X)");
+                                  statusTextView.setTextColor(Color.parseColor("#89B4FA"));
+                              }
+                          }
+                      }, 400);
+                  } else {
+                      statusTextView.setText(isXTurn ? "Player X's Turn" : "Player O's Turn");
+                      statusTextView.setTextColor(Color.parseColor("#89B4FA"));
+                  }
+              }
+
+              private void makeMove(int r, int c, int player) {
+                  int index = r * 3 + c;
+                  board[index] = player;
+                  movesCount++;
+
+                  Button btn = buttons[r][c];
+                  if (player == 1) {
+                      btn.setText("X");
+                      btn.setTextColor(Color.parseColor("#A6E3A1"));
+                  } else {
+                      btn.setText("O");
+                      btn.setTextColor(Color.parseColor("#FAB387"));
+                  }
+              }
+
+              private boolean checkGameStatus() {
+                  int winner = getWinner();
+                  if (winner != 0) {
+                      gameOver = true;
+                      if (winner == 1) {
+                          scoreX++;
+                          String title = currentMode == GameMode.VS_AI ? "🎉 You Won!" : "🎉 Player X Wins!";
+                          statusTextView.setText(title);
+                          statusTextView.setTextColor(Color.parseColor("#A6E3A1"));
+                          Toast.makeText(this, title, Toast.LENGTH_SHORT).show();
+                      } else {
+                          scoreO++;
+                          String title = currentMode == GameMode.VS_AI ? "🤖 AI Wins!" : "🎉 Player O Wins!";
+                          statusTextView.setText(title);
+                          statusTextView.setTextColor(Color.parseColor("#FAB387"));
+                          Toast.makeText(this, title, Toast.LENGTH_SHORT).show();
+                      }
+                      updateScoreUI();
+                      return true;
+                  }
+
+                  if (movesCount == 9) {
+                      gameOver = true;
+                      scoreDraw++;
+                      statusTextView.setText("🤝 It's a Draw!");
+                      statusTextView.setTextColor(Color.parseColor("#CDD6F4"));
+                      Toast.makeText(this, "It's a Draw!", Toast.LENGTH_SHORT).show();
+                      updateScoreUI();
+                      return true;
+                  }
+
+                  return false;
+              }
+
+              private void makeAiMove() {
+                  int bestMove = -1;
+
+                  if (currentDifficulty == Difficulty.EASY) {
+                      bestMove = getRandomMove();
+                  } else if (currentDifficulty == Difficulty.NORMAL) {
+                      bestMove = getWinningOrBlockingMove(2);
+                      if (bestMove == -1) {
+                          bestMove = getWinningOrBlockingMove(1);
+                      }
+                      if (bestMove == -1) {
+                          bestMove = random.nextBoolean() ? findBestMinimaxMove() : getRandomMove();
+                      }
+                  } else {
+                      bestMove = findBestMinimaxMove();
+                  }
+
+                  if (bestMove != -1) {
+                      int r = bestMove / 3;
+                      int c = bestMove % 3;
+                      makeMove(r, c, 2);
+                  }
+              }
+
+              private int getRandomMove() {
+                  List<Integer> emptyIndices = new ArrayList<>();
+                  for (int i = 0; i < 9; i++) {
+                      if (board[i] == 0) emptyIndices.add(i);
+                  }
+                  if (emptyIndices.isEmpty()) return -1;
+                  return emptyIndices.get(random.nextInt(emptyIndices.size()));
+              }
+
+              private int getWinningOrBlockingMove(int player) {
+                  for (int i = 0; i < 9; i++) {
+                      if (board[i] == 0) {
+                          board[i] = player;
+                          boolean wins = (getWinner() == player);
+                          board[i] = 0;
+                          if (wins) return i;
+                      }
+                  }
+                  return -1;
+              }
+
+              private int findBestMinimaxMove() {
+                  int bestVal = -1000;
+                  int bestMove = -1;
+                  for (int i = 0; i < 9; i++) {
+                      if (board[i] == 0) {
+                          board[i] = 2;
+                          int moveVal = minimax(0, false);
+                          board[i] = 0;
+                          if (moveVal > bestVal) {
+                              bestMove = i;
+                              bestVal = moveVal;
+                          }
+                      }
+                  }
+                  return bestMove != -1 ? bestMove : getRandomMove();
+              }
+
+              private int minimax(int depth, boolean isMax) {
+                  int winner = getWinner();
+                  if (winner == 2) return 10 - depth;
+                  if (winner == 1) return -10 + depth;
+                  if (isBoardFull()) return 0;
+
+                  if (isMax) {
+                      int best = -1000;
+                      for (int i = 0; i < 9; i++) {
+                          if (board[i] == 0) {
+                              board[i] = 2;
+                              best = Math.max(best, minimax(depth + 1, false));
+                              board[i] = 0;
+                          }
+                      }
+                      return best;
+                  } else {
+                      int best = 1000;
+                      for (int i = 0; i < 9; i++) {
+                          if (board[i] == 0) {
+                              board[i] = 1;
+                              best = Math.min(best, minimax(depth + 1, true));
+                              board[i] = 0;
+                          }
+                      }
+                      return best;
+                  }
+              }
+
+              private boolean isBoardFull() {
+                  for (int i = 0; i < 9; i++) {
+                      if (board[i] == 0) return false;
+                  }
+                  return true;
+              }
+
+              private int getWinner() {
+                  int[][] lines = {
+                      {0, 1, 2}, {3, 4, 5}, {6, 7, 8},
+                      {0, 3, 6}, {1, 4, 7}, {2, 5, 8},
+                      {0, 4, 8}, {2, 4, 6}
+                  };
+                  for (int[] line : lines) {
+                      if (board[line[0]] != 0 && board[line[0]] == board[line[1]] && board[line[1]] == board[line[2]]) {
+                          return board[line[0]];
+                      }
+                  }
+                  return 0;
+              }
+
+              private void resetBoard() {
+                  for (int i = 0; i < 9; i++) {
+                      board[i] = 0;
+                  }
+                  for (int i = 0; i < 3; i++) {
+                      for (int j = 0; j < 3; j++) {
+                          buttons[i][j].setText("");
+                      }
+                  }
+                  isXTurn = true;
+                  gameOver = false;
+                  isAiThinking = false;
+                  movesCount = 0;
+
+                  if (currentMode == GameMode.VS_AI) {
+                      statusTextView.setText("Your Turn (X)");
+                  } else {
+                      statusTextView.setText("Player X's Turn");
+                  }
+                  statusTextView.setTextColor(Color.parseColor("#89B4FA"));
+              }
+          }
+          EOF
+
+          # ৮. বিল্ট-ইন Android SDK লাইসেন্স গ্রহণ করা
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+
+          # ৯. Gradle ডাউনলোড ও এক্সট্রাক্ট করা
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+
+          # ১০. APK বিল্ড করা
+          ./gradle-8.5/bin/gradle assembleDebug
+
+      # ১১. তৈরি হওয়া APK আর্টফ্যাক্ট হিসেবে সেভ করা
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TicTacToe-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
